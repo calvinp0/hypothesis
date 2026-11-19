@@ -74,10 +74,28 @@ class OneCharStringStrategy(SearchStrategy[str]):
             max_codepoint=max_codepoint,
             categories=categories,
             exclude_characters=exclude_characters,
-            include_characters=include_characters,
         )
+        include_intervals = IntervalSet.from_string("".join(include_characters))
         if codec is not None:
-            intervals &= charmap.intervals_from_codec(codec)
+            encodable, non_roundtrip = charmap.intervals_from_codec(codec)
+            intervals &= encodable
+            if undecided := (intervals & non_roundtrip) - include_intervals:
+                chars = "".join(map(chr, undecided))
+                # also show the \u-escaped form, in case the raw repr doesn't
+                # display or copy-paste cleanly in the user's terminal
+                aka = "" if ascii(chars) == repr(chars) else f" (aka {chars!a})"
+                raise InvalidArgument(
+                    f"Characters {chars!r}{aka} can be encoded with "
+                    f"codec={codec!r}, but do not decode back to the same "
+                    "character, so strings containing them do not round-trip.  "
+                    "Please pass each of them in either include_characters, "
+                    f"to generate them anyway, or exclude_characters={chars!r}, "
+                    "to generate only characters which round-trip."
+                )
+        # include_characters are generated even if excluded by other arguments,
+        # such as the passed categories or codepoint range.  (overlap with
+        # exclude_characters raises an error in st.characters())
+        intervals |= include_intervals
 
         _arg_repr = ", ".join(
             f"{k}={v!r}"
